@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>Trợ lý đọc báo khoa học</title>
+<style>
+  :root { color-scheme: light; }
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 0 auto; padding: 1.5rem; background: #f7f7f8; color: #1a1a1a; }
+  h1 { font-size: 1.3rem; color: #1a1a1a; }
+  #chat { display: flex; flex-direction: column; gap: 0.9rem; margin-bottom: 6rem; }
+  .msg { padding: 0.7rem 1rem; border-radius: 10px; line-height: 1.5; white-space: pre-wrap; max-width: 85%; }
+  .user { align-self: flex-end; background: #2563eb; color: white; }
+  .assistant { align-self: flex-start; background: white; border: 1px solid #e2e2e2; color: #1a1a1a; }
+  .sources { font-size: 0.8rem; color: #666; margin-top: 0.4rem; }
+  form { position: fixed; bottom: 0; left: 0; right: 0; display: flex; gap: 0.5rem; padding: 1rem; background: #f7f7f8; max-width: 720px; margin: 0 auto; box-sizing: border-box; }
+  input { flex: 1; padding: 0.7rem; border-radius: 8px; border: 1px solid #ccc; font-size: 1rem; background: white; color: #1a1a1a; }
+  input::placeholder { color: #888; }
+  button { padding: 0.7rem 1.2rem; border: none; border-radius: 8px; background: #2563eb; color: white; cursor: pointer; font-size: 1rem; }
+  button:disabled { opacity: 0.5; }
+  #clear { background: white; color: #333; border: 1px solid #ccc; }
+</style>
+</head>
+<body>
+  <h1>📄 Trợ lý đọc báo khoa học</h1>
+  <button id="clear" type="button">🗑️ Xoá lịch sử</button>
+  <div id="chat"></div>
+
+  <form id="form">
+    <input id="question" placeholder="Nhập câu hỏi của bạn..." autocomplete="off" />
+    <button type="submit">Gửi</button>
+  </form>
+
+<script>
+const chat = document.getElementById("chat");
+const form = document.getElementById("form");
+const input = document.getElementById("question");
+const SOURCES_MARKER = "\x00SOURCES\x00";
+
+function addMessage(role, text) {
+  const el = document.createElement("div");
+  el.className = "msg " + role;
+  el.textContent = text;
+  chat.appendChild(el);
+  window.scrollTo(0, document.body.scrollHeight);
+  return el;
+}
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const question = input.value.trim();
+  if (!question) return;
+  input.value = "";
+  input.disabled = true;
+
+  addMessage("user", question);
+  const assistantEl = addMessage("assistant", "");
+
+  const res = await fetch("/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question }),
+  });
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let full = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    full += decoder.decode(value, { stream: true });
+
+    const markerIdx = full.indexOf(SOURCES_MARKER);
+    const visible = markerIdx === -1 ? full : full.slice(0, markerIdx);
+    assistantEl.textContent = visible;
+    window.scrollTo(0, document.body.scrollHeight);
+  }
+
+  const markerIdx = full.indexOf(SOURCES_MARKER);
+  if (markerIdx !== -1) {
+    try {
+      const sources = JSON.parse(full.slice(markerIdx + SOURCES_MARKER.length));
+      if (sources.length) {
+        const srcEl = document.createElement("div");
+        srcEl.className = "sources";
+        srcEl.textContent = "Nguồn: " + sources.map(s => `${s.name} (tr.${s.page})`).join("; ");
+        assistantEl.appendChild(srcEl);
+      }
+    } catch (_) {}
+  }
+
+  input.disabled = false;
+  input.focus();
+});
+
+document.getElementById("clear").addEventListener("click", async () => {
+  await fetch("/clear", { method: "POST" });
+  chat.innerHTML = "";
+});
+</script>
+</body>
+</html>
